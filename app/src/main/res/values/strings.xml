@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">RxAndroid-sample</string>
+
+    <string name="action_logout">Logout</string>
+    <string name="title_activity_main">MainActivity</string>
+
+    <string name="connecting">Connecting to Twitter…</string>
+    <string name="timeline_error">Failed to get timeline</string>
+
+    <string name="key_access_token" translatable="false">key_access_token</string>
+    <string name="key_access_token_secret" translatable="false">key_access_token_secret</string>
+
+    <!-- Please put your consumer key, consumer secret and callback url -->
+    <string name="consumer_key">xxxxxxxxxxxxxxxxxxxxx</string>
+    <string name="consumer_secret">xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</string>
+    <string name="callback_url">xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</string>
+
+</resources>

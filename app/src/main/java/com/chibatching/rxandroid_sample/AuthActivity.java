@@ -15,6 +15,7 @@ import android.webkit.WebViewClient;
 import rx.Observable;
 import rx.Subscriber;
 import rx.android.schedulers.AndroidSchedulers;
+import rx.functions.Func1;
 import rx.schedulers.Schedulers;
 import rx.subscriptions.CompositeSubscription;
 import twitter4j.Twitter;
@@ -27,10 +28,19 @@ import twitter4j.auth.RequestToken;
 public class AuthActivity extends Activity {
     private ProgressDialog mProgressDialog;
 
-    private RequestToken mRequestToken;
     private Twitter mTwitter;
 
     private CompositeSubscription mCompositeSubscription = new CompositeSubscription();
+
+    class AuthInfo {
+        String verifier;
+        RequestToken requestToken;
+
+        AuthInfo(String verifier, RequestToken requestToken) {
+            this.verifier = verifier;
+            this.requestToken = requestToken;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,50 +54,55 @@ public class AuthActivity extends Activity {
         mTwitter.setOAuthConsumer(consumerKey, consumerSecret);
         // Create twitter authentication observable
         mCompositeSubscription.add(Observable.create(
-                new Observable.OnSubscribe<String>() {
+                new Observable.OnSubscribe<RequestToken>() {
                     @Override
-                    public void call(Subscriber<? super String> subscriber) {
+                    public void call(Subscriber<? super RequestToken> subscriber) {
                         try {
-                            mRequestToken = mTwitter.getOAuthRequestToken();
-                            mCompositeSubscription.add(startWebView(mRequestToken.getAuthorizationURL())
-                                    .subscribeOn(AndroidSchedulers.mainThread())
-                                    .subscribe(verifier -> {
-                                        subscriber.onNext(verifier);
-                                        subscriber.onCompleted();
-                                    }));
+                            subscriber.onNext(mTwitter.getOAuthRequestToken());
+                            subscriber.onCompleted();
                         } catch (TwitterException e) {
                             subscriber.onError(e);
                         }
                     }
                 })
-                .subscribeOn(Schedulers.io())
+                .flatMap(new Func1<RequestToken, Observable<AuthInfo>>() {
+                    @Override
+                    public Observable<AuthInfo> call(RequestToken requestToken) {
+                        return startWebView(requestToken).subscribeOn(AndroidSchedulers.mainThread());
+                    }
+                })
                 .observeOn(Schedulers.io())
-                .subscribe(
-                        verifier -> {
-                            mCompositeSubscription.add(Observable.create(subscriber -> {
-                                try {
-                                    AccessToken accessToken = mTwitter.getOAuthAccessToken(mRequestToken, verifier);
-                                    SharedPreferences preference = PreferenceManager.getDefaultSharedPreferences(AuthActivity.this);
-                                    preference.edit()
-                                            .putString(getString(R.string.key_access_token), accessToken.getToken())
-                                            .putString(getString(R.string.key_access_token_secret), accessToken.getTokenSecret())
-                                            .commit();
-                                    subscriber.onNext(null);
-                                    subscriber.onCompleted();
-                                } catch (TwitterException e) {
-                                    e.printStackTrace();
-                                }
-                            })
-                                    .subscribeOn(Schedulers.io())
-                                    .observeOn(AndroidSchedulers.mainThread())
-                                    .subscribe(object -> {
-                                        mProgressDialog.dismiss();
-                                        Intent intent = new Intent(AuthActivity.this, MainActivity.class);
-                                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                                        startActivity(intent);
-                                        AuthActivity.this.finish();
-                                    }));
-                        }));
+                .flatMap(authInfo -> Observable.create(new Observable.OnSubscribe<AccessToken>() {
+                    @Override
+                    public void call(Subscriber<? super AccessToken> subscriber) {
+                        try {
+                            AccessToken accessToken =
+                                    mTwitter.getOAuthAccessToken(authInfo.requestToken, authInfo.verifier);
+                            subscriber.onNext(accessToken);
+                            subscriber.onCompleted();
+                        } catch (TwitterException e) {
+                            e.printStackTrace();
+                            subscriber.onError(e);
+                            subscriber.onCompleted();
+                        }
+
+                    }
+                }))
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(accessToken -> {
+                    SharedPreferences preference =
+                            PreferenceManager.getDefaultSharedPreferences(AuthActivity.this);
+                    preference.edit()
+                            .putString(getString(R.string.key_access_token), accessToken.getToken())
+                            .putString(getString(R.string.key_access_token_secret), accessToken.getTokenSecret())
+                            .commit();
+                    mProgressDialog.dismiss();
+                    Intent intent = new Intent(AuthActivity.this, MainActivity.class);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(intent);
+                    AuthActivity.this.finish();
+                }));
 
         mProgressDialog = new ProgressDialog(this);
         mProgressDialog.setMessage(getString(R.string.connecting));
@@ -100,11 +115,11 @@ public class AuthActivity extends Activity {
         mCompositeSubscription.unsubscribe();
     }
 
-    private Observable<String> startWebView(String url) {
+    private Observable<AuthInfo> startWebView(RequestToken requestToken) {
         mProgressDialog.dismiss();
-        return Observable.create(new Observable.OnSubscribe<String>() {
+        return Observable.create(new Observable.OnSubscribe<AuthInfo>() {
             @Override
-            public void call(Subscriber<? super String> subscriber) {
+            public void call(Subscriber<? super AuthInfo> subscriber) {
                 WebView webView = (WebView) findViewById(R.id.WebView);
                 webView.setWebViewClient(new WebViewClient() {
                     private boolean flag = false;
@@ -127,7 +142,10 @@ public class AuthActivity extends Activity {
                             } else {
                                 cmng.removeAllCookie();
                             }
-                            subscriber.onNext(Uri.parse(url).getQueryParameter("oauth_verifier"));
+
+                            AuthInfo authInfo =
+                                    new AuthInfo(Uri.parse(url).getQueryParameter("oauth_verifier"), requestToken);
+                            subscriber.onNext(authInfo);
                             subscriber.onCompleted();
                             // WebView の非表示
                             webView.setVisibility(WebView.GONE);
@@ -137,9 +155,9 @@ public class AuthActivity extends Activity {
                     }
                 });
                 webView.getSettings().setJavaScriptEnabled(true);
-                webView.loadUrl(url);
+                webView.loadUrl(requestToken.getAuthorizationURL());
                 webView.setVisibility(WebView.VISIBLE);
             }
-        });
+        }).subscribeOn(AndroidSchedulers.mainThread());
     }
 }

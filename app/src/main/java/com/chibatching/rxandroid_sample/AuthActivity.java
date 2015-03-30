@@ -147,7 +147,7 @@ public class AuthActivity extends Activity {
                                     new AuthInfo(Uri.parse(url).getQueryParameter("oauth_verifier"), requestToken);
                             subscriber.onNext(authInfo);
                             subscriber.onCompleted();
-                            // WebView の非表示
+                            // Dismiss webview
                             webView.setVisibility(WebView.GONE);
                             webView.destroy();
                             mProgressDialog.show();
